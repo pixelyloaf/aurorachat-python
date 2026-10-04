@@ -1,0 +1,6 @@
+.venv/
+tests/
+.stfolder/
+auctest.py
+auctestaccount.txt
+aucaccount.txt
