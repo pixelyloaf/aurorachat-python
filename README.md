@@ -3,12 +3,14 @@ aurorachat for python
 
 note that im ass at python
 
-thsi client features
+this client features
 
 - auto sign in
 - markdown
-- commands (auc prefixed)
+- commands (~~auc~~ slash prefixed)
 - rooms
 - dms
 - rules
-- room history
+- room history that should actually work
+- embeds
+- whatsapp

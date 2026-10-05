@@ -5,12 +5,45 @@ import shutil
 # this is meant for restarting python when logging out and the quit command
 import os
 import sys
+import tkinter as tk
+import urllib.request
+import getpass
+from tkinter import filedialog
 from rich.console import Console
 from rich.text import Text
 from discord_markdown_ast_parser import parse
 from urllib.parse import unquote, quote
 from pathlib import Path
+from PIL import Image, ImageTk
 console = Console()
+
+# ip
+
+SERVER = ("104.236.25.60", 7070)
+# SERVER = ("startendo.org", 7070)
+#SERVER = ("192.168.1.191", 7070)
+
+# history logic
+def history():    
+    s.sendall(b"history|65536|\n")
+    history = b""
+    s.settimeout(0.5)
+    try:
+        while True:
+            chunk = s.recv(2048)
+            if not chunk:
+                break
+            history += chunk
+    except socket.timeout:
+        pass
+    s.settimeout(None)
+    for line in history.decode().splitlines():
+        parts = line.split("|")
+        if parts[0] == "msg":
+            messenger = parts[1]
+            content = unquote(parts[2])
+            console.print(f"<{messenger}> ", end="")
+            console.print(format_message(content))
 
 # markdown
 
@@ -40,6 +73,8 @@ def format_message(content):
                 text.append("\n")
         elif node.node_type.name == "CODE_INLINE":
             text.append(node.children[0].text_content, style="white on grey23")
+        elif node.node_type.name in ("URL_WITH_PREVIEW", "URL_WITHOUT_PREVIEW"):
+            text.append(node.url)
         elif node.node_type.name == "SPOILER":
             spoiler_count += 1
             spoiler_id = f"SPOILER{spoiler_count}"
@@ -69,18 +104,18 @@ else:
 
     if choice == "l":
         username = input("username: ")
-        password = input("password")
+        password = getpass.getpass("password: ")
     elif choice == "r":
         username = input("username: ")
-        password = input("password: ")
-        password2 = input("repeat password: ")
+        password = getpass.getpass("password: ")
+        password2 = getpass.getpass("repeat password: ")
 
         if password != password2:
             print("have you tried matching them correctly")
             exit()
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.connect(("104.236.25.60", 7070))
+    s.connect(SERVER)
 
     # hello server
     s.recv(1024)
@@ -115,27 +150,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     room = "general"
     s.sendall(b"join|general\n")
     set_room_header(room)
-
-    # history logic
-    s.sendall(b"history|65536|\n")
-    history = b""
-    s.settimeout(0.5)
-    try:
-        while True:
-            chunk = s.recv(2048)
-            if not chunk:
-                break
-            history += chunk
-    except socket.timeout:
-        pass
-    s.settimeout(None)
-    for line in history.decode().splitlines():
-        parts = line.split("|")
-        if parts[0] == "msg":
-            messenger = parts[1]
-            content = unquote(parts[2])
-            console.print(f"<{messenger}> ", end="")
-            console.print(format_message(content))
+    history()
 
     # messages
     def receive_messages():
@@ -167,7 +182,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         message = input("")
         print("\033[1A\033[2K", end="")
         # commands
-        prefix = "/auc "
+        prefix = "/"
         # room switching
         if message.startswith(prefix +"room #"):
             command = "room"
@@ -183,7 +198,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 room = message[len(prefix + "join #"):].strip()
             set_room_header(room)
             s.sendall(f"join|{room}\n".encode())
-            s.sendall(b"history\n")
+            history()
         # dms
         elif message.startswith(prefix + "dm @"):
             dm_user = message[len(prefix + "dm @"):].strip()
@@ -194,7 +209,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     room = "@" + dm_user
                     set_room_header(room)
                     s.sendall(f"join|{room}\n".encode())
-                    s.sendall(b"history\n")
         # motd
         elif message == prefix + "motd":
             s.sendall(b"motd|\n")
@@ -202,8 +216,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             input()
             print("\033[2J\033[H", end="")
             set_room_header(room)
-
-            s.sendall(b"history\n")
+            history()
         # rules command because i feel like it and nobody can stop me
         elif message == prefix +"rules":
             s.sendall(b"rules\n")
@@ -211,7 +224,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             input()
             print("\033[2J\033[H", end="", flush=True)
             set_room_header(room)
-            s.sendall(b"history\n")
+            history()
         # spoiler revealing
         elif message.startswith(prefix + "reveal "):
             spoiler_id = message[len(prefix + "reveal "):].upper()
@@ -230,6 +243,73 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         elif message == prefix + "exit":
             s.close()
             sys.exit()
+        # embeds
+        # gif embeds
+        elif message == prefix + "image gif":
+            root = tk.Tk()
+            root.withdraw()
+            file = filedialog.askopenfilename(
+                filetypes=[("choose a gif", "*.gif")]
+            )
+            root.destroy()
+            if file:
+                with open(file, "rb") as f:
+                    data = f.read()
+                request = urllib.request.Request(
+                    f"http://{SERVER[0]}:7080/embeds",
+                    data=data,
+                    headers={
+                        "Authorization": f"V7 {username}|{password}|",
+                        "Content-Type": "image/gif"
+                    },
+                    method="POST"
+                ) 
+                with urllib.request.urlopen(request) as response:
+                    embed = response.read().decode().strip()
+                message = f"http://{SERVER[0]}:7080/embeds/" + embed
+                s.sendall(f"msg|{quote(message)}|\n".encode()
+                )
+        # png embeds
+        elif message == prefix + "image png":
+                    root = tk.Tk()
+                    root.withdraw()
+                    file = filedialog.askopenfilename(
+                        filetypes=[("choose a png", "*.png")]
+                    )
+                    root.destroy()
+                    if file:
+                        with open(file, "rb") as f:
+                            data = f.read()
+                        request = urllib.request.Request(
+                            f"http://{SERVER[0]}/embeds",
+                            data=data,
+                            headers={
+                                "Authorization": f"V7 {username}|{password}|",
+                                "Content-Type": "image/png"
+                            },
+                            method="POST"
+                        ) 
+                        with urllib.request.urlopen(request) as response:
+                            embed = response.read().decode().strip()
+                        message = f"http://{SERVER[0]}:7080/embeds/" + embed
+                        s.sendall(f"msg|{quote(message)}|\n".encode()
+                        )
+        elif message == prefix + "image":
+            print("you gotta do /image png or gif")
+        # whatsapp
+        elif message == prefix + "whatsapp":
+            whatsapp = Path(__file__).parent / "whatsapp.jpg"
+            root = tk.Tk()
+            root.title("WhatsApp")
+            image = Image.open(whatsapp)
+            photo = ImageTk.PhotoImage(image)
+            label = tk.Label(root, image=photo)
+            label.pack()
+            root.mainloop()
+        # help
+        elif message == prefix + "help":
+            print("/room #[room] switches rooms\n/dm @[user] dms a user\n/motd shows the motd\n/rules shows the rules again\n/reveal spoiler[id]\n/logout logs you out and restarts the app\n/exit closes the app\n/image png uploads a png\n/image gif uploads a gif\n/whatsapp i forgor")
+
         # no commands found
         elif message.startswith(prefix):
             console.print("unknown command")
