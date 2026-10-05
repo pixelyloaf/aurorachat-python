@@ -19,9 +19,9 @@ console = Console()
 
 # ip
 
-# SERVER = ("104.236.25.60", 7070)
+SERVER = ("104.236.25.60", 7070)
 # SERVER = ("startendo.org", 7070)
-SERVER = ("192.168.1.191", 7070)
+# SERVER = ("192.168.1.191", 7070)
 
 # history logic
 def history():    
