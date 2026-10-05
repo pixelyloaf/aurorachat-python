@@ -19,9 +19,9 @@ console = Console()
 
 # ip
 
-SERVER = ("104.236.25.60", 7070)
+# SERVER = ("104.236.25.60", 7070)
 # SERVER = ("startendo.org", 7070)
-#SERVER = ("192.168.1.191", 7070)
+SERVER = ("192.168.1.191", 7070)
 
 # history logic
 def history():    
@@ -281,7 +281,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         with open(file, "rb") as f:
                             data = f.read()
                         request = urllib.request.Request(
-                            f"http://{SERVER[0]}/embeds",
+                            f"http://{SERVER[0]}:7080/embeds",
                             data=data,
                             headers={
                                 "Authorization": f"V7 {username}|{password}|",
