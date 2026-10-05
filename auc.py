@@ -22,9 +22,9 @@ console = Console()
 
 # ip
 
-SERVER = ("104.236.25.60", 7070)
+# SERVER = ("104.236.25.60", 7070)
 # SERVER = ("startendo.org", 7070)
-# SERVER = ("192.168.1.191", 7070)
+SERVER = ("192.168.1.191", 7070)
 
 # history logic
 def history():    
@@ -348,11 +348,11 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             print("/room #[room] switches rooms\n/dm @[user] dms a user\n/motd shows the motd\n/rules shows the rules again\n/reveal spoiler[id]\n/logout logs you out and restarts the app\n/exit closes the app\n/image png uploads a png\n/image gif uploads a gif\n/whatsapp i forgor\n/shit shitting toothpaste.")
 
         # shit
-        elif message == prefix + "shit":
+        elif message == prefix + "shit" or message == "s!shit":
             shitgif = "https://media1.tenor.com/m/7I_oY2VHBuQAAAAd/poop.gif"
             data = urlopen(shitgif).read()
             image = Image.open (BytesIO(data))
-            s.sendall(f"msg|{quote("https://tenor.com/view/poop-gif-21741703")}\n".encode())
+            s.sendall(f"msg|{quote("s!shit https://tenor.com/view/poop-gif-21741703")}\n".encode())
             window = tk.Tk()
             window.title("s!shit")
             frames = []
