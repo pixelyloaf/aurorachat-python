@@ -8,6 +8,7 @@ import sys
 import tkinter as tk
 import urllib.request
 import getpass
+import readline
 from tkinter import filedialog
 from rich.console import Console
 from rich.text import Text
@@ -15,6 +16,8 @@ from discord_markdown_ast_parser import parse
 from urllib.parse import unquote, quote
 from pathlib import Path
 from PIL import Image, ImageTk
+from urllib.request import urlopen
+from io import BytesIO
 console = Console()
 
 # ip
@@ -115,10 +118,22 @@ else:
             exit()
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.connect(SERVER)
+    try:
+        s.connect(SERVER)
+    except ConnectionRefusedError:
+        print("failed to connect (servers probably down)")
+        exit()
 
     # hello server
-    s.recv(1024)
+    response = s.recv(1024).decode().strip()
+    parts = response.split("|")
+    if not response.startswith("hello|"):
+        if parts[0] == "err":
+            if parts[1] == "unknown_internal":
+                print("unknown server error")
+                exit()
+        print(response)
+        exit()
 
     if choice == "l":
         s.sendall(f"login|{username}|{password}\n".encode())
@@ -127,7 +142,26 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 
     # login response
     response = s.recv(1024).decode().strip()
+    parts = response.split("|")
+    if response != "ok|":
+        if parts[0] == "err":
+            if parts[1] == "banned":
+                if parts[2]:
+                    print(f"you were banned for: {parts[2]}")
+                else:
+                    print("you were banned with no reason")
+                exit()
+            elif parts[1] == "user_exists":
+                print("choose a different user (err|user_exists|)")
+                exit()
+            elif parts[1] == "bad_login":
+                print("wrong user or password twih 💔 (err|bad_login|)")
+                exit()
+            elif parts[1] == "register_disabled":
+                print("registers are disabled (err|register_disabled|)")
+                exit()
 
+    
     if response != "ok|":
         print(response)
         exit()
@@ -163,9 +197,12 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 messenger = parts[1]
                 content = parts[2]
                 content = unquote(content)
-                message = Text(f"<{messenger}> ")
+                chatbox = readline.get_line_buffer()
+                print("\r\033[2K", end="")
+                message = Text(f"<{messenger}> ", end="")
                 console.print(message, end="")
                 console.print(format_message(content))
+                print(chatbox, end="", flush=True)
             # display motd
             elif parts[0] == "motd":
                 content = unquote(parts[1])
@@ -308,8 +345,39 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             root.mainloop()
         # help
         elif message == prefix + "help":
-            print("/room #[room] switches rooms\n/dm @[user] dms a user\n/motd shows the motd\n/rules shows the rules again\n/reveal spoiler[id]\n/logout logs you out and restarts the app\n/exit closes the app\n/image png uploads a png\n/image gif uploads a gif\n/whatsapp i forgor")
+            print("/room #[room] switches rooms\n/dm @[user] dms a user\n/motd shows the motd\n/rules shows the rules again\n/reveal spoiler[id]\n/logout logs you out and restarts the app\n/exit closes the app\n/image png uploads a png\n/image gif uploads a gif\n/whatsapp i forgor\n/shit shitting toothpaste.")
 
+        # shit
+        elif message == prefix + "shit":
+            shitgif = "https://media1.tenor.com/m/7I_oY2VHBuQAAAAd/poop.gif"
+            data = urlopen(shitgif).read()
+            image = Image.open (BytesIO(data))
+            s.sendall(f"msg|{quote("https://tenor.com/view/poop-gif-21741703")}\n".encode())
+            window = tk.Tk()
+            window.title("s!shit")
+            frames = []
+            try:
+                while True:
+                    frame = ImageTk.PhotoImage(image.copy())
+                    frames.append(frame)
+                    image.seek(len(frames))
+            except EOFError:
+                pass
+            label = tk.Label(window)
+            label.pack()
+            after_id = None
+            def animate(frame=0):
+                global afterid
+                label.config(image=frames[frame])
+                afterid = window.after(100, animate, (frame + 1) % len(frames))
+            def windowclose():
+                if afterid is not None:
+                    window.after_cancel(afterid)
+                window.destroy()
+            window.protocol("WM_DELETE_WINDOW", windowclose)
+            animate()
+            window.mainloop()
+            
         # no commands found
         elif message.startswith(prefix):
             console.print("unknown command")
