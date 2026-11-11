@@ -6,9 +6,10 @@ import shutil
 import os
 import sys
 import tkinter as tk
-import urllib.request
 import getpass
 import readline
+import signal
+import shlex
 from tkinter import filedialog
 from rich.console import Console
 from rich.text import Text
@@ -16,34 +17,41 @@ from discord_markdown_ast_parser import parse
 from urllib.parse import unquote, quote
 from pathlib import Path
 from PIL import Image, ImageTk
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from io import BytesIO
 console = Console()
 
 # ip
 
-# SERVER = ("104.236.25.60", 7070)
-# SERVER = ("startendo.org", 7070)
-SERVER = ("192.168.1.191", 7070)
+#SERVER = ("104.236.25.60", 7070)
+#SERVER = ("startendo.org", 7070)
+SERVER = ("144.217.26.87", 7070)
+#SERVER = ("192.168.1.191", 7070)
+#SERVER = ("10.246.54.25", 7070)
 
 # history logic
+pissity = threading.Lock()
 def history():    
-    s.sendall(b"history|65536|\n")
-    history = b""
-    s.settimeout(0.5)
-    try:
-        while True:
-            chunk = s.recv(2048)
-            if not chunk:
-                break
-            history += chunk
-    except socket.timeout:
-        pass
-    s.settimeout(None)
-    for line in history.decode().splitlines():
+    data = b""
+    with pissity:
+        s.sendall(b"history|65536|\n")
+        s.settimeout(0.5)
+        try:
+            while True:
+                chunk = s.recv(2048)
+                if not chunk:
+                    break
+                data += chunk
+        except socket.timeout:
+            pass
+        finally:
+            s.settimeout(0.1)
+    for line in data.decode().splitlines():
         parts = line.split("|")
         if parts[0] == "msg":
             messenger = parts[1]
+            if messenger.lower() in muted_users:
+                continue                
             content = unquote(parts[2])
             console.print(f"<{messenger}> ", end="")
             console.print(format_message(content))
@@ -55,6 +63,7 @@ spoiler_count = 0
 def format_message(content):
     global spoiler_count
     try:
+        content = content.replace(f"@{username}", f"**@{username}**")
         parsed = parse(content)
     except Exception:
         return Text(content)
@@ -97,11 +106,45 @@ def set_room_header(room):
     print(f"\033[2;{rows}r", end="")
     print("\033[2;1H", end="")
 
+# muted user saving
+
+mute_list = Path(__file__).parent / "mutedusers.txt"
+if mute_list.exists():
+    muted_users = {
+        line.strip().lower()
+        for line in mute_list.read_text().splitlines()
+        if line.strip()
+    }
+else:
+    muted_users = set()
+
+def keep_muted():
+    mute_list.write_text("\n".join(sorted(muted_users)) + ("\n" if muted_users else ""))
+
+# account
 account_file = Path(__file__).parent / "aucaccount.txt"
+
+accounts = {}
 # check for account file
 if account_file.exists():
-    username, password= account_file.read_text().splitlines()
+    account_data = account_file.read_text().splitlines()
+    for i in range(0, len(account_data) - 2, 3):
+        accounts[account_data[i]] = (
+            account_data[i + 1],
+            account_data[i + 2]
+        )
+
+oldauc = False
+oldaucaccount = (accounts.get("startendo.org") or accounts.get("104.236.25.60"))
+
+# server sign in logic
+if SERVER[0] in accounts:
+    username, password= accounts[SERVER[0]]
     choice = "l"
+elif oldaucaccount:
+    username, password = oldaucaccount
+    choice = "r"
+    oldauc = True
 else:
     choice = input("[L]ogin or [R]egister: ").lower()
 
@@ -117,12 +160,36 @@ else:
             print("have you tried matching them correctly")
             exit()
 
+# old vps users that were on v7 or werent converted
+if oldauc:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as migration:
+        try:
+            migration.connect(SERVER)
+        except ConnectionRefusedError:
+            print("failed to connect (servers probably down)")
+            exit()
+        response = migration.recv(1024).decode().strip()
+        if not response.startswith("hello|"):
+            print("uh oh stinky:", response)
+            exit()
+        migration.sendall(f"register|{username}|{password}\n".encode())
+        response = migration.recv(1024).decode().strip()
+        parts = response.split("|")
+        if response != "ok|" and not (
+            parts[0] == "err" and parts[1] == "user_exists"
+        ):
+            print("uh oh stinky:", response)
+            exit()
+        choice = "l"
+
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     try:
         s.connect(SERVER)
     except ConnectionRefusedError:
         print("failed to connect (servers probably down)")
         exit()
+
+    os.system('clear')
 
     # hello server
     response = s.recv(1024).decode().strip()
@@ -165,7 +232,16 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     if response != "ok|":
         print(response)
         exit()
-    account_file.write_text(f"{username}\n{password}")
+    # account server saving
+    accounts[SERVER[0]] = (username, password)
+    if oldauc:
+        accounts.pop("startendo.org", None)
+        accounts.pop("104.236.25.60", None)
+
+    account_data = []
+    for server, account in accounts.items():
+        account_data.extend([server, account[0], account[1]])
+    account_file.write_text("\n".join(account_data) + "\n")
 
     # rules
     s.sendall(b"rules\n")
@@ -189,17 +265,32 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     # messages
     def receive_messages():
         while True:
-            message = s.recv(1024).decode()
+            try:
+                with pissity:
+                    message = s.recv(1024).decode()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
             # format it better
             parts = message.split("|")
 
             if parts[0] == "msg":
                 messenger = parts[1]
+                if messenger.lower() in muted_users:
+                    continue
                 content = parts[2]
                 content = unquote(content)
                 chatbox = readline.get_line_buffer()
                 print("\r\033[2K", end="")
-                message = Text(f"<{messenger}> ", end="")
+                message = Text("<")
+                if "[DISCORD]" in messenger:
+                    username, tag = messenger.split("[DISCORD]", 1)
+                    message.append(username)
+                    message.append("[DISCORD]", style="blue")
+                else:
+                    message.append(messenger)
+                message.append("> ")
                 console.print(message, end="")
                 console.print(format_message(content))
                 print(chatbox, end="", flush=True)
@@ -271,68 +362,59 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 console.print("there's no spoiler id with that")
         # logout
         elif message == prefix + "logout":
-
             if account_file.exists():
                 account_file.unlink()
-
             os.execv(sys.executable, [sys.executable] + sys.argv)
         # exit
         elif message == prefix + "exit":
             s.close()
             sys.exit()
         # embeds
-        # gif embeds
-        elif message == prefix + "image gif":
+        elif message == prefix + "image":
             root = tk.Tk()
             root.withdraw()
             file = filedialog.askopenfilename(
-                filetypes=[("choose a gif", "*.gif")]
+                filetypes=[("images", "*.gif *.png *.jpg *.jpeg *.webp *.bmp")]
             )
             root.destroy()
             if file:
+                extension = Path(file).suffix.lower()
+                if extension == ".gif":
+                    apple = "image/gif"
+                elif extension == ".png":
+                    apple = "image/png"
+                elif extension in (".jpg", ".jpeg", ".bmp", ".webp"):
+                    convert_dir = Path(__file__).parent / "convert"
+                    convert_dir.mkdir(exist_ok=True)
+                    yesconvert = convert_dir / f"{Path(file).stem}.png"
+                    command = (
+                        f"ffmpeg -v error -y -i {shlex.quote(file)} "
+                        f"{shlex.quote(str(yesconvert))}"
+                    )
+                    if os.system(command) != 0:
+                                console.print("uh oh stinky")
+                                yesconvert.unlink(missing_ok=True)
+                                continue
+                    file = str(yesconvert)
+                    apple = "image/png"
+                else:
+                    print("this isnt supported or i havent bothered to add support yet")
+                    continue
                 with open(file, "rb") as f:
                     data = f.read()
-                request = urllib.request.Request(
+                request = Request(
                     f"http://{SERVER[0]}:7080/embeds",
                     data=data,
                     headers={
                         "Authorization": f"V7 {username}|{password}|",
-                        "Content-Type": "image/gif"
+                        "Content-TYpe": apple
                     },
                     method="POST"
-                ) 
-                with urllib.request.urlopen(request) as response:
+                )
+                with urlopen(request) as response:
                     embed = response.read().decode().strip()
                 message = f"http://{SERVER[0]}:7080/embeds/" + embed
-                s.sendall(f"msg|{quote(message)}|\n".encode()
-                )
-        # png embeds
-        elif message == prefix + "image png":
-                    root = tk.Tk()
-                    root.withdraw()
-                    file = filedialog.askopenfilename(
-                        filetypes=[("choose a png", "*.png")]
-                    )
-                    root.destroy()
-                    if file:
-                        with open(file, "rb") as f:
-                            data = f.read()
-                        request = urllib.request.Request(
-                            f"http://{SERVER[0]}:7080/embeds",
-                            data=data,
-                            headers={
-                                "Authorization": f"V7 {username}|{password}|",
-                                "Content-Type": "image/png"
-                            },
-                            method="POST"
-                        ) 
-                        with urllib.request.urlopen(request) as response:
-                            embed = response.read().decode().strip()
-                        message = f"http://{SERVER[0]}:7080/embeds/" + embed
-                        s.sendall(f"msg|{quote(message)}|\n".encode()
-                        )
-        elif message == prefix + "image":
-            print("you gotta do /image png or gif")
+                s.sendall(f"msg|{quote(message)}|\n".encode())
         # whatsapp
         elif message == prefix + "whatsapp":
             whatsapp = Path(__file__).parent / "whatsapp.jpg"
@@ -345,8 +427,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             root.mainloop()
         # help
         elif message == prefix + "help":
-            print("/room #[room] switches rooms\n/dm @[user] dms a user\n/motd shows the motd\n/rules shows the rules again\n/reveal spoiler[id]\n/logout logs you out and restarts the app\n/exit closes the app\n/image png uploads a png\n/image gif uploads a gif\n/whatsapp i forgor\n/shit shitting toothpaste.")
-
+            print("/room #[room] switches rooms\n/dm @[user] dms a user\n/motd shows the motd\n/rules shows the rules again\n/reveal spoiler[id]\n/logout logs you out and restarts the app\n/exit closes the app\n/image png uploads a png\n/image gif uploads a gif\n/whatsapp i forgor\n/shit shitting toothpaste.\n/orstando converts the code to orstandos code\n/mute mutes a user\n/unmute unmutes a user")
         # shit
         elif message == prefix + "shit" or message == "s!shit":
             shitgif = "https://media1.tenor.com/m/7I_oY2VHBuQAAAAd/poop.gif"
@@ -377,7 +458,56 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             window.protocol("WM_DELETE_WINDOW", windowclose)
             animate()
             window.mainloop()
-            
+        # orstando
+        elif message == prefix + "orstando":
+            print("im gonna segfault")
+            os.kill(os.getpid(), signal.SIGSEGV)
+        # goog...
+        elif message == prefix + "goog":
+            data = urlopen(Request("https://static2.klipy.com/ii/a8ada81afc59159ea5c8927feffa2e31/2a/d9/Zf6EfGvoabz5t0zDzf1.gif", headers={"User-Agent": "Mozilla/5.0"})).read()
+            image = Image.open(BytesIO(data))
+            window = tk.Tk()
+            window.title("goog")
+            frames = []
+            try:
+                while True:
+                    frame = ImageTk.PhotoImage(image.copy())
+                    frames.append(frame)
+                    image.seek(len(frames))
+            except EOFError:
+                pass
+            label = tk.Label(window)
+            label.pack()
+            after_id = None
+            def animate(frame=0):
+                global after_id
+                label.config(image=frames[frame])
+                after_id = window.after(100, animate, (frame + 1) % len(frames))
+            def windowclose():
+                if after_id is not None:
+                    window.after_cancel(after_id)
+                window.destroy()
+            window.protocol("WM_DELETE_WINDOW", windowclose)
+            animate()
+            window.mainloop()
+        # mute
+        elif message.startswith(prefix + "mute @"):
+            muted_user = message[len(prefix + "mute @"):].strip().lower()
+            if muted_user:
+                muted_users.add(muted_user)
+                keep_muted()
+                console.print(f"muted {muted_user}")
+        # unmute
+        elif message.startswith(prefix + "unmute @"):
+            muted_user = message[len(prefix + "unmute @"):].strip().lower()
+            if muted_user in muted_users:
+                muted_users.remove(muted_user)
+                keep_muted()
+                console.print(f"unmuted {muted_user}")
+            else:
+                console.print("wrong username twih")
+        elif message == prefix + "mute":
+            console.print("you need to do @username")
         # no commands found
         elif message.startswith(prefix):
             console.print("unknown command")
