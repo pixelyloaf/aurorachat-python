@@ -19,6 +19,7 @@ from pathlib import Path
 from PIL import Image, ImageTk
 from urllib.request import Request, urlopen
 from io import BytesIO
+from datetime import datetime
 console = Console()
 
 # ip
@@ -27,6 +28,7 @@ console = Console()
 #SERVER = ("startendo.org", 7070)
 SERVER = ("144.217.26.87", 7070)
 #SERVER = ("192.168.1.191", 7070)
+#SERVER = ("localhost", 7070)
 #SERVER = ("10.246.54.25", 7070)
 
 # history logic
@@ -53,7 +55,9 @@ def history():
             if messenger.lower() in muted_users:
                 continue                
             content = unquote(parts[2])
-            console.print(f"<{messenger}> ", end="")
+            timestamp = int(parts[3])
+            time = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+            console.print(f"[{time}] <{messenger}> ", end="")
             console.print(format_message(content))
 
 # markdown
@@ -134,17 +138,20 @@ if account_file.exists():
             account_data[i + 2]
         )
 
-oldauc = False
-oldaucaccount = (accounts.get("startendo.org") or accounts.get("104.236.25.60"))
-
 # server sign in logic
+
+if SERVER[0] not in accounts:
+    if "startendo.org" in accounts:
+        accounts[SERVER[0]] = accounts["startendo.org"]
+    elif "104.236.25.60" in accounts:
+        accounts[SERVER[0]] = accounts["104.236.25.60"]
+
+accounts.pop("startendo.org", None)
+accounts.pop("104.236.25.60", None)
+
 if SERVER[0] in accounts:
     username, password= accounts[SERVER[0]]
     choice = "l"
-elif oldaucaccount:
-    username, password = oldaucaccount
-    choice = "r"
-    oldauc = True
 else:
     choice = input("[L]ogin or [R]egister: ").lower()
 
@@ -159,28 +166,6 @@ else:
         if password != password2:
             print("have you tried matching them correctly")
             exit()
-
-# old vps users that were on v7 or werent converted
-if oldauc:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as migration:
-        try:
-            migration.connect(SERVER)
-        except ConnectionRefusedError:
-            print("failed to connect (servers probably down)")
-            exit()
-        response = migration.recv(1024).decode().strip()
-        if not response.startswith("hello|"):
-            print("uh oh stinky:", response)
-            exit()
-        migration.sendall(f"register|{username}|{password}\n".encode())
-        response = migration.recv(1024).decode().strip()
-        parts = response.split("|")
-        if response != "ok|" and not (
-            parts[0] == "err" and parts[1] == "user_exists"
-        ):
-            print("uh oh stinky:", response)
-            exit()
-        choice = "l"
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     try:
@@ -234,10 +219,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         exit()
     # account server saving
     accounts[SERVER[0]] = (username, password)
-    if oldauc:
-        accounts.pop("startendo.org", None)
-        accounts.pop("104.236.25.60", None)
-
     account_data = []
     for server, account in accounts.items():
         account_data.extend([server, account[0], account[1]])
@@ -280,10 +261,12 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 if messenger.lower() in muted_users:
                     continue
                 content = parts[2]
+                timestamp = int(parts[3])
                 content = unquote(content)
+                time = datetime.fromtimestamp(timestamp).strftime("%H:%M")
                 chatbox = readline.get_line_buffer()
                 print("\r\033[2K", end="")
-                message = Text("<")
+                message = Text(f"[{time}] <")
                 if "[DISCORD]" in messenger:
                     username, tag = messenger.split("[DISCORD]", 1)
                     message.append(username)
